@@ -1,0 +1,10 @@
+data:
+  target: sgm.data.in1k_dataset.ImagenetLoader
+  params:
+    train:
+      resize: 256
+      data_path: '/mnt/data/oss_beijing/imagenet1k/train'
+      loader:
+        batch_size: 3 # 3bs x 4gpu = 12total_bs
+        num_workers: 4
+        shuffle: True

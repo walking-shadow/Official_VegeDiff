@@ -1,0 +1,190 @@
+diffusion:
+  scale_factor: 0.13025
+  disable_first_stage_autocast: True
+  pretrained_image_ckpt: checkpoints/stable-diffusion-xl-base-1.0/sd_xl_base_1.0.safetensors
+  input_key: imgs
+  log_keys: # TODO
+    - txt
+
+  # LR schedule #TODO
+  # scheduler_config:
+  #   target: sgm.lr_scheduler.LambdaLinearScheduler
+  #   params:
+  #     warm_up_steps: [ 10000 ]
+  #     cycle_lengths: [ 10000000000000 ]
+  #     f_start: [ 1.e-6 ]
+  #     f_max: [ 1. ]
+  #     f_min: [ 1. ]
+
+  # Video SD-XL
+  network_config:
+    target: sgm.modules.diffusionmodules.models.videomodel.VideoUNetModel
+    params:
+      adm_in_channels: 2816
+      num_classes: sequential
+      use_checkpoint: False
+      in_channels: 4
+      out_channels: 4
+      model_channels: 320
+      attention_resolutions: [4, 2]
+      num_res_blocks: 2
+      channel_mult: [1, 2, 4]
+      num_head_channels: 64
+      use_spatial_transformer: True
+      use_linear_in_transformer: True
+      transformer_depth: [1, 2, 10]  # note: the first is unused (due to attn_res starting at 2) 32, 16, 8 --> 64, 32, 16
+      context_dim: 2048
+      spatial_transformer_attn_type: softmax
+      legacy: False
+      temporal_module_kwargs:
+        num_attention_heads                : 8
+        # num_transformer_block              : 1 # now we don't support setting block layer from config
+        # attention_block_types              : [ "Temporal_Self", "Temporal_Self" ]
+        attention_block_types              : [ "Temporal_Self" ]
+        temporal_position_encoding         : true
+        temporal_position_encoding_max_len : 24
+        temporal_attention_dim_div         : 1
+        zero_initialize                    : true
+        gradient_checkpoint                : true
+  network_wrapper: sgm.modules.diffusionmodules.wrappers.VideoWrapper
+  compile_model: False
+  trainable_modules:
+    - "temporal_transformer"
+  
+  # conditioner config
+  conditioner_config:
+    target: sgm.modules.GeneralConditioner
+    params:
+      emb_models:
+        # crossattn cond
+        - is_trainable: False
+          input_key: txt
+          ucg_rate: 0.1
+          target: sgm.modules.encoders.modules.FrozenCLIPEmbedder
+          params:
+            layer: hidden
+            layer_idx: 11
+        # crossattn and vector cond
+        - is_trainable: False
+          input_key: txt
+          ucg_rate: 0.1
+          target: sgm.modules.encoders.modules.FrozenOpenCLIPEmbedder2
+          params:
+            arch: ViT-bigG-14
+            version: laion2b_s39b_b160k
+            freeze: True
+            layer: penultimate
+            always_return_pooled: True
+            legacy: False
+        # vector cond
+        - is_trainable: False
+          ucg_rate: 0.1
+          input_key: original_size_as_tuple
+          target: sgm.modules.encoders.modules.ConcatTimestepEmbedderND
+          params:
+            outdim: 256  # multiplied by two
+        # vector cond 
+        - is_trainable: False
+          ucg_rate: 0.1
+          input_key: crop_coords_top_left
+          target: sgm.modules.encoders.modules.ConcatTimestepEmbedderND
+          params:
+            outdim: 256  # multiplied by two
+        # vector cond
+        - is_trainable: False
+          ucg_rate: 0.1
+          input_key: target_size_as_tuple
+          target: sgm.modules.encoders.modules.ConcatTimestepEmbedderND
+          params:
+            outdim: 256  # multiplied by two
+
+  # VAE config 
+  first_stage_config:
+    from_pretrained: stabilityai/sdxl-vae
+
+  # DM config
+  denoiser_config:
+    target: sgm.modules.diffusionmodules.denoiser.DiscreteDenoiser
+    params:
+      num_idx: 1000
+
+      weighting_config:
+        target: sgm.modules.diffusionmodules.denoiser_weighting.EpsWeighting
+      scaling_config:
+        target: sgm.modules.diffusionmodules.denoiser_scaling.EpsScaling
+      discretization_config:
+        target: sgm.modules.diffusionmodules.discretizer.LegacyDDPMDiscretization
+
+  loss_fn_config: # EDM loss
+    target: sgm.modules.diffusionmodules.loss.StandardDiffusionLoss
+    params:
+      sigma_sampler_config:
+        target: sgm.modules.diffusionmodules.sigma_sampling.DiscreteSampling
+        params:
+          num_idx: 1000
+
+          discretization_config:
+            target: sgm.modules.diffusionmodules.discretizer.LegacyDDPMDiscretization
+
+  sampler_config: # EDM Sampler
+    target: sgm.modules.diffusionmodules.sampling.EulerEDMSampler
+    params:
+      num_steps: 50
+
+      discretization_config:
+        target: sgm.modules.diffusionmodules.discretizer.LegacyDDPMDiscretization
+
+      guider_config: # CFG guider
+        target: sgm.modules.diffusionmodules.guiders.VanillaCFG
+        params:
+          scale: 7.5
+
+
+data:
+  target: sgm.data.webvid10m.Webvid10MLoader
+  params:
+    train:
+      data_path: s3://infdata/video/
+      meta_path: dataset/meta/webvid10m_clean_meta.txt
+      clip_length: 16
+      clip_FPS_reate: 4
+      resize_resolution: [336, 596]
+      crop_resolution: [320, 576]
+      horizontal_flip: True
+      loader:
+        batch_size: 2 # for each pgu
+        num_workers: 8
+        shuffle: False
+
+accelerate:
+  # others
+  gradient_accumulation_steps: 1
+  mixed_precision: bf16
+  
+  # training step config
+  num_train_epochs: 2
+  max_train_steps: 
+  # optimizer config
+  learning_rate: 0.0001 # 32 GPU x 3 Batch Size
+  learning_rate_base_batch_size: 96
+  max_grad_norm: 1.0
+  optimizer:
+    target: torch.optim.AdamW
+    params:
+      betas: ${tuple:0.9, 0.999}
+      weight_decay: 0.01
+      eps: 1e-8
+  lr_scheduler: constant
+  lr_warmup_steps: 500
+  # checkpoint config
+  checkpointing_epochs: False
+  checkpointing_steps: 5000 # 1000
+  checkpointing_steps_list: [8,99,5000, 10000, 20000, 40000, 80000, 160000, 320000, 640000]
+  checkpoints_total_limit: 5
+  logging_steps: 1000
+  # validation config
+  validate_steps: 5000
+  log_video_numbers: 4
+
+  fsdp_shard_grad_op: True
+  fsdp_full_shard: False

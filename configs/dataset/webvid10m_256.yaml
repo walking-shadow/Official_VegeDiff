@@ -1,0 +1,15 @@
+data:
+  target: sgm.data.webvid10m.Webvid2MLoader
+  params:
+    train:
+      data_path: s3://infdata/video/
+      meta_path: dataset/meta/webvid10m0_meta.txt
+      clip_length: 10
+      clip_FPS_reate: 1
+      resize_resolution: [256, 256]
+      crop_resolution: [256, 256]
+      horizontal_flip: True
+      loader:
+        batch_size: 3 # 3bs x 4gpu = 12total_bs
+        num_workers: 32
+        shuffle: True

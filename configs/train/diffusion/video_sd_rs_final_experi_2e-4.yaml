@@ -1,0 +1,158 @@
+diffusion:
+  scale_factor: 0.13025
+  # scale_factor: 1
+
+  disable_first_stage_autocast: True
+  # pretrained_image_ckpt: checkpoints/sd_xl_base_1.0.safetensors
+  # pretrained_image_ckpt: checkpoints/768-v-ema.safetensors
+  input_key: imgs
+  img_log_step_inteval: 100  # 每若干步就记录一次图片
+  log_keys: # TODO
+    - txt
+  
+  # DiT
+  network_config:
+    target: sgm.modules.diffusionmodules.models.DiT.DiT
+
+
+    # DiT-B
+    params:
+      in_channels: 4
+      input_size: 16
+      depth: 12
+      hidden_size: 768
+      patch_size: 2
+      num_heads: 12
+      learn_sigma: False
+      use_checkpoint: True
+      noise_image_num: 20 # 加噪过程中，需要加入噪声的图像的数量，即需要预测的未来图像的数量
+      image_time_length: 30  # 时间序列长度
+      static_channel: 5  # 静态环境变量的通道数
+      climate_channel: 24  # 气象变量的通道数
+      vae_down_ratio: 8
+      temporal_module_kwargs:
+        num_attention_heads                : 6
+        attention_block_types              : [ "Temporal_Self" ]
+        temporal_position_encoding         : true
+        temporal_position_encoding_max_len : 31  # 遥感图像序列+静态变量
+        temporal_attention_dim_div         : 1
+        zero_initialize                    : true
+        gradient_checkpoint                : true
+  network_wrapper: sgm.modules.diffusionmodules.wrappers.DiTWrapper
+  compile_model: False
+
+  # conditioner config
+  conditioner_config:
+    target: sgm.modules.GeneralConditioner
+    params:
+      emb_models:
+
+        # meso condition vector cond
+        - is_trainable: True
+          input_key: meso_condition_image
+          ucg_rate: 0.1
+          target: sgm.modules.encoders.modules.Identify_Mapping
+          params:
+            param1: True
+            # in_channel: 24
+            # out_channel: 256  # 两个condition image的输出通道数相加需要和context_dim一致
+
+        # highres condition vector cond
+        - is_trainable: True
+          input_key: highres_condition_image
+          ucg_rate: 0.1
+          target: sgm.modules.encoders.modules.Identify_Mapping
+          params:
+            param1: True
+
+  # VAE config 
+  first_stage_config:
+    config_path: configs/train/autoencoder/autoencoder_kl_32x32x4.yaml
+    pretrained_path: checkpoints/autoencoder_rs.ckpt  # TODO 修改成自己的autoencoder预训练模型
+    # from_pretrained: stabilityai/sdxl-vae
+
+  # DM config
+  denoiser_config:
+    target: sgm.modules.diffusionmodules.denoiser.DiscreteDenoiser
+    params:
+      num_idx: 1000
+
+      weighting_config:
+        # target: sgm.modules.diffusionmodules.denoiser_weighting.EpsWeighting
+        target: sgm.modules.diffusionmodules.denoiser_weighting.MinSNRWeight
+      scaling_config:
+        target: sgm.modules.diffusionmodules.denoiser_scaling.EpsScaling
+      discretization_config:
+        target: sgm.modules.diffusionmodules.discretizer.LegacyDDPMDiscretization
+
+  loss_fn_config: # EDM loss
+    target: sgm.modules.diffusionmodules.loss.StandardDiffusionLoss
+    params:
+      noise_image_num: 20 # 加噪过程中，需要加入噪声的图像的数量，即需要预测的未来图像的数量
+      past_weight: 0.1 # 过去均值图像的比例，输入模型的未来图像的噪声=w*past_mean+(1-w)*noise
+      sigma_sampler_config:
+        target: sgm.modules.diffusionmodules.sigma_sampling.DiscreteSampling
+        params:
+          num_idx: 1000  # 加噪过程中，噪声的级别数量
+          discretization_config:
+            target: sgm.modules.diffusionmodules.discretizer.LegacyDDPMDiscretization
+
+  sampler_config: # EDM Sampler
+    target: sgm.modules.diffusionmodules.sampling.EulerEDMSampler
+    params:
+      num_steps: 10
+
+      discretization_config:
+        target: sgm.modules.diffusionmodules.discretizer.LegacyDDPMDiscretization
+
+      guider_config: # CFG guider
+        target: sgm.modules.diffusionmodules.guiders.VanillaCFG
+        params:
+          scale: 2
+
+
+data:
+  target: sgm.data.webvid10m.Webvid10MLoader
+  params:
+    mode: train  # should be train or test
+    # high_resolution: [128, 128]
+    # meso_resolution: [80, 80]
+    data_root_dir: 'cluster1:s3://earth_land_cover_bench/earthnet2021x_data'
+    train_data_path_file: '/mnt/petrelfs/zhaosijie/video_stable_diffusion/stable_diffusion_video/data_path_file/train_path_file.txt'
+    fp16: False  # using fp16 or fp32
+    min_lc: 10
+    max_lc: 40
+    noise_image_num: 20
+    train_batch_size: 16  # for each gpu
+    test_batch_size: 16  # 可以是训练的4倍
+    num_workers: 8
+    test_track: "iid"
+
+accelerate:
+  # others
+  gradient_accumulation_steps: 1
+  mixed_precision: bf16
+  
+  # training step config
+  num_train_epochs: 400
+  max_train_steps: 
+  # optimizer config
+  learning_rate: 0.0002 # 8 GPU x 16 Batch Size
+  learning_rate_base_batch_size: 128
+  max_grad_norm: 1.0
+  optimizer:
+    target: torch.optim.AdamW
+    params:
+      betas: ${tuple:0.9, 0.999}
+      weight_decay: 0.01
+      eps: 1e-8
+  lr_scheduler: constant
+  lr_warmup_steps: 500
+  # checkpoint config
+  checkpointing_epochs: False  # 设置为True会导致一个epoch里很多步都记录模型，占得空间太大
+  checkpointing_steps: 2500 # 1000
+  checkpointing_steps_list: [2500, 5000, 10000, 20000, 40000, 80000, 160000, 320000, 640000]
+  checkpoints_total_limit: 5
+  logging_steps: 1000
+  validate_epoch_interval: 10
+  validate_batch_num: 10000

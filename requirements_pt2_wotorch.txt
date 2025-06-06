@@ -1,0 +1,57 @@
+ipdb
+omegaconf
+jupyter
+einops
+fire
+tqdm
+pillow
+numpy
+webdataset>=0.2.33
+ninja
+matplotlib
+torchmetrics
+opencv-python==4.6.0.66
+fairscale
+pytorch-lightning
+fire
+fsspec
+kornia
+natsort
+open-clip-torch
+chardet==5.1.0
+tensorboardx==2.6
+pandas
+pudb
+pyyaml
+urllib3<1.27,>=1.25.4
+scipy
+streamlit>=0.73.1
+timm
+tokenizers==0.12.1
+transformers
+# triton
+torchdata
+wandb
+ipdb
+imageio==2.9.0
+imageio-ffmpeg==0.4.3
+moviepy==1.0.3
+accelerate
+moviepy
+decord
+av
+fvcore
+kornia
+invisible-watermark
+diffusers
+mosaicml-streaming
+earthnet
+
+--index-url https://download.pytorch.org/whl/cu118
+torch==2.1.0
+torchvision==0.16.0
+torchaudio==2.1.0
+xformers==0.0.22.post4
+# aioboto3
+# aiobotocore
+# flash-attn --no-build-isolation

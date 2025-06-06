@@ -1,0 +1,91 @@
+diffusion:
+  scale_factor: 0.13025
+  # scale_factor: 1
+
+  disable_first_stage_autocast: True
+  # pretrained_image_ckpt: checkpoints/sd_xl_base_1.0.safetensors
+  # pretrained_image_ckpt: checkpoints/768-v-ema.safetensors
+  input_key: imgs
+  noise_image_num: 20
+  img_log_step_inteval: 100  # 每若干步就记录一次图片
+  log_keys: # TODO
+    - txt
+
+  # convlstm
+  network_config:
+    target: sgm.reproduction_model.earthformer.ContextFormer
+    params:
+      param1: True
+
+
+  loss_fn_config: # EDM loss
+    target: sgm.modules.diffusionmodules.loss_reproduction.StandardDiffusionLoss
+    params:
+      param1: True
+
+
+data:
+  target: sgm.data.webvid10m.Webvid10MLoader
+  params:
+    mode: train  # should be train or test
+    # high_resolution: [128, 128]
+    # meso_resolution: [80, 80]
+    data_root_dir: 'cluster1:s3://earth_land_cover_bench/earthnet2021x_data'
+    train_data_path_file: '/mnt/petrelfs/zhaosijie/video_stable_diffusion/stable_diffusion_video/data_path_file/train_path_file.txt'
+    # train_data_mean: [0.20569735, 0.21914243, 0.22088862, 0.36983472]
+    # train_data_var: [0.07937277, 0.06975007, 0.06693621, 0.04060663]
+    # meta_path: dataset/meta/webvid10m_clean_meta.txt
+    # task_txt: write some task txt here
+    fp16: False  # using fp16 or fp32
+    min_lc: 10
+    max_lc: 40
+    noise_image_num: 20
+    # val_pct: 0.01
+    # val_split_seed: 42
+    train_batch_size: 16  # for each gpu
+    # val_batch_size: 4
+    test_batch_size: 16  # 可以是训练的4倍
+    num_workers: 8
+    test_track: "iid"
+
+      # clip_length: 16
+      # clip_FPS_reate: 4
+      # resize_resolution: [512]
+      # crop_resolution: [512, 512]
+      # horizontal_flip: True
+      # loader:
+      #   batch_size: 3 # for each pgu
+      #   num_workers: 8
+      #   shuffle: True
+
+accelerate:
+  # others
+  gradient_accumulation_steps: 1
+  mixed_precision: bf16
+  
+  # training step config
+  num_train_epochs: 100
+  max_train_steps: 
+  # optimizer config
+  learning_rate: 0.0001 # 4 GPU x 64 Batch Size
+  learning_rate_base_batch_size: 32
+  max_grad_norm: 1.0
+  optimizer:
+    target: torch.optim.AdamW
+    params:
+      betas: ${tuple:0.9, 0.999}
+      weight_decay: 0.01
+      eps: 1e-8
+  lr_scheduler: constant
+  lr_warmup_steps: 500
+  # checkpoint config
+  checkpointing_epochs: False  # 设置为True会导致一个epoch里很多步都记录模型，占得空间太大
+  checkpointing_steps: 2500 # 1000
+  checkpointing_steps_list: [2500, 5000, 10000, 20000, 40000, 80000, 160000, 320000, 640000]
+  checkpoints_total_limit: 5
+  logging_steps: 1000
+  validate_epoch_interval: 1
+  validate_batch_num: 10
+  # validation config
+  # validate_steps: 5000
+  # log_video_numbers: 4

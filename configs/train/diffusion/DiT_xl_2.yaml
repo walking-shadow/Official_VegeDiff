@@ -1,0 +1,157 @@
+model:
+  base_learning_rate: 1.0e-4
+  target: sgm.models.diffusion.DiffusionEngine
+  params:
+    input_key: jpg
+    scale_factor: 0.18215 # 0.13025 for xl; 0.18215 for SD
+    disable_first_stage_autocast: True
+    log_keys: # discard for DiT
+      - txt
+
+    # LR schedule
+    # scheduler_config: 
+    #   target: sgm.lr_scheduler.LambdaLinearScheduler
+    #   params:
+    #     warm_up_steps: [ 10000 ]
+    #     cycle_lengths: [ 10000000000000 ]
+    #     f_start: [ 1.e-6 ]
+    #     f_max: [ 1. ]
+    #     f_min: [ 1. ]
+
+    # DiT
+    network_config:
+      target: sgm.modules.diffusionmodules.models.DiT.DiT
+      params:
+        depth: 28
+        hidden_size: 1152
+        patch_size: 2
+        num_heads: 16
+        learn_sigma: False
+        use_checkpoint: True
+    
+    network_wrapper: sgm.modules.diffusionmodules.wrappers.DiTWrapper
+
+    # conditioner config
+    conditioner_config: # Done
+      target: sgm.modules.AdaLNZeroConditioner
+      params:
+        emb_models:
+          # Class + AdaLNZero
+          - is_trainable: True
+            input_key: cls # vector
+            ucg_rate: 0.1
+            target: sgm.modules.encoders.modules.AdaLNZeroEmbedder
+            params:
+              embed_dim: 1152
+              n_classes: 1001
+
+    # VAE config 
+    first_stage_config:
+      from_pretrained: stabilityai/sd-vae-ft-ema
+      target: sgm.models.autoencoder.AutoencoderKLInferenceWrapper
+      params:
+        embed_dim: 4
+        monitor: val/rec_loss
+        ddconfig:
+          double_z: true
+          z_channels: 4
+          resolution: 256
+          in_channels: 3
+          out_ch: 3
+          ch: 128
+          ch_mult: [1, 2, 4, 4]
+          num_res_blocks: 2
+          attn_resolutions: []
+          dropout: 0.0
+        lossconfig:
+          target: torch.nn.Identity
+
+    # DM config
+    denoiser_config:
+      target: sgm.modules.diffusionmodules.denoiser.DiscreteDenoiser
+      params:
+        num_idx: 1000
+
+        weighting_config:
+          target: sgm.modules.diffusionmodules.denoiser_weighting.EpsWeighting
+        scaling_config:
+          target: sgm.modules.diffusionmodules.denoiser_scaling.EpsScaling
+        discretization_config:
+          target: sgm.modules.diffusionmodules.discretizer.LegacyDDPMDiscretization
+
+    loss_fn_config:
+      target: sgm.modules.diffusionmodules.loss.StandardDiffusionLoss
+      params:
+        sigma_sampler_config:
+          target: sgm.modules.diffusionmodules.sigma_sampling.DiscreteSampling
+          params:
+            num_idx: 1000
+
+            discretization_config:
+              target: sgm.modules.diffusionmodules.discretizer.LegacyDDPMDiscretization
+
+    sampler_config:
+      target: sgm.modules.diffusionmodules.sampling.EulerEDMSampler
+      params:
+        num_steps: 50
+
+        discretization_config:
+          target: sgm.modules.diffusionmodules.discretizer.LegacyDDPMDiscretization
+
+        guider_config:
+          target: sgm.modules.diffusionmodules.guiders.VanillaCFG
+          params:
+            scale: 7.5
+
+data:
+  target: sgm.data.in1k_dataset.ImagenetLoader
+  params:
+    train:
+      resize: 256
+      data_path: '/mnt/data/oss_beijing/imagenet1k/train'
+      loader:
+        batch_size: 2 # 32*8=256
+        num_workers: 4
+        shuffle: True
+
+lightning: 
+  strategy:
+    target: pytorch_lightning.strategies.DDPStrategy
+    # params:
+      # find_unused_parameters: False
+
+  # strategy:
+  #   target: pytorch_lightning.strategies.DDPStrategy
+  #   params:
+  #     find_unused_parameters: False
+
+  modelcheckpoint:
+    params:
+      every_n_train_steps: 40000
+
+  callbacks:
+    metrics_over_trainsteps_checkpoint:
+      params:
+        every_n_train_steps: 25000
+
+    image_logger:
+      target: main.ImageLogger
+      params:
+        disabled: False
+        enable_autocast: False
+        batch_frequency: 1000
+        max_images: 8
+        increase_log_steps: True
+        log_first_step: False
+        log_images_kwargs:
+          use_ema_scope: False
+          N: 8
+          n_rows: 2
+
+  trainer:
+    devices: 4
+    benchmark: True
+    num_sanity_val_steps: 0
+    accumulate_grad_batches: 1
+    max_epochs: 1400
+# 4700 * 1400

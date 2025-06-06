@@ -1,0 +1,95 @@
+model:
+  base_learning_rate: 4.5e-6
+  target: sgm.models.autoencoder_lit2.AutoencodingEngine
+  params:
+    input_key: jpg
+    monitor: val/rec_loss
+
+    loss_config:
+      target: sgm.modules.autoencoding.losses.GeneralLPIPSWithDiscriminator
+      params:
+        perceptual_weight: 0.25
+        disc_start: 50001
+        disc_weight: 0.5
+        learn_logvar: True
+
+        regularization_weights:
+          kl_loss: 0.000001
+
+    regularizer_config:
+      target: sgm.modules.autoencoding.regularizers.DiagonalGaussianRegularizer
+
+    encoder_config:
+      target: sgm.modules.diffusionmodules.model.Encoder
+      params:
+        attn_type: none
+        double_z: True
+        z_channels: 4
+        resolution: 256
+        in_channels: 3
+        out_ch: 3
+        ch: 128
+        ch_mult: [ 1, 2, 4, 4 ]
+        num_res_blocks: 2
+        attn_resolutions: [ ]
+        dropout: 0.0
+
+    decoder_config:
+      target: sgm.modules.diffusionmodules.model.Decoder
+      params:
+        attn_type: none
+        double_z: False
+        z_channels: 4
+        resolution: 256
+        in_channels: 3
+        out_ch: 3
+        ch: 128
+        ch_mult: [ 1, 2, 4, 4 ]
+        num_res_blocks: 2
+        attn_resolutions: [ ]
+        dropout: 0.0
+
+data:
+  target: sgm.data.in1k_dataset.ImagenetLoader
+  params:
+    train:
+      resize: 256
+      data_path: '/mnt/data/oss_beijing/imagenet1k/train'
+      loader:
+        batch_size: 3 # 3bs x 4gpu = 12total_bs
+        num_workers: 4
+        shuffle: True
+
+lightning:
+  strategy:
+    target: pytorch_lightning.strategies.DDPStrategy
+    params:
+      find_unused_parameters: True
+
+  modelcheckpoint:
+    save_last_checkpoint:
+      params:
+        every_n_epochs: 1
+        save_last: True
+
+    save_period_checkpoint:
+      params:
+        every_n_train_steps: 100
+        save_top_k: 2
+        monitor: step
+        mode: max
+        save_last: False
+
+  callbacks:
+    image_logger:
+      target: sgm.utils.lit_utils.ImageLogger
+      params:
+        enable_autocast: False
+        batch_frequency: 1000
+        max_images: 8
+        increase_log_steps: True
+        clamp: True
+
+  trainer:
+    accumulate_grad_batches: 1
+    max_epochs: 20

@@ -1,0 +1,148 @@
+model:
+  base_learning_rate: 0.000000390625 #1e-4/256
+  target: sgm.models.diffusion.DiffusionEngine
+  params:
+    input_key: jpg
+    scale_factor: 0.18215 # 0.13025 for xl; 0.18215 for SD
+    disable_first_stage_autocast: True
+    log_keys: # discard for DiT
+      - txt
+
+    # LR schedule
+    # scheduler_config: 
+    #   target: sgm.lr_scheduler.LambdaLinearScheduler
+    #   params:
+    #     warm_up_steps: [ 10000 ]
+    #     cycle_lengths: [ 10000000000000 ]
+    #     f_start: [ 1.e-6 ]
+    #     f_max: [ 1. ]
+    #     f_min: [ 1. ]
+
+    # DiT
+    network_config:
+      target: sgm.modules.diffusionmodules.models.DiT.DiT
+      params:
+        depth: 12
+        hidden_size: 768
+        patch_size: 2
+        num_heads: 12
+        learn_sigma: False
+        use_checkpoint: True
+    network_wrapper: sgm.modules.diffusionmodules.wrappers.DiTWrapper
+    # conditioner config
+    conditioner_config:
+      target: sgm.modules.AdaLNZeroConditioner
+      params:
+        emb_models:
+          # Class + AdaLNZero
+          - is_trainable: True
+            input_key: cls # vector
+            ucg_rate: 0.1
+            target: sgm.modules.encoders.modules.AdaLNZeroEmbedder
+            params:
+              embed_dim: 768
+              n_classes: 1000
+
+    # VAE config 
+    first_stage_config:
+      from_pretrained: stabilityai/sd-vae-ft-ema
+      # from_pretrained: /home/luzeyu/.cache/huggingface/hub/models--stabilityai--sd-vae-ft-ema/snapshots/f04b2c4b98319346dad8c65879f680b1997b204a
+      target: sgm.models.autoencoder.AutoencoderKLInferenceWrapper
+      params:
+        embed_dim: 4
+        monitor: val/rec_loss
+        ddconfig:
+          double_z: true
+          z_channels: 4
+          resolution: 256
+          in_channels: 3
+          out_ch: 3
+          ch: 128
+          ch_mult: [1, 2, 4, 4]
+          num_res_blocks: 2
+          attn_resolutions: []
+          dropout: 0.0
+        lossconfig:
+          target: torch.nn.Identity
+
+    # DM config
+    denoiser_config: # EDM denoiser
+      target: sgm.modules.diffusionmodules.denoiser.DiscreteDenoiser
+      params:
+        num_idx: 1000
+
+        weighting_config:
+          target: sgm.modules.diffusionmodules.denoiser_weighting.EpsWeighting
+        scaling_config:
+          target: sgm.modules.diffusionmodules.denoiser_scaling.EpsScaling
+        discretization_config:
+          target: sgm.modules.diffusionmodules.discretizer.LegacyDDPMDiscretization
+
+    loss_fn_config: # EDM loss
+      target: sgm.modules.diffusionmodules.loss.StandardDiffusionLoss
+      params:
+        sigma_sampler_config:
+          target: sgm.modules.diffusionmodules.sigma_sampling.DiscreteSampling
+          params:
+            num_idx: 1000
+
+            discretization_config:
+              target: sgm.modules.diffusionmodules.discretizer.LegacyDDPMDiscretization
+
+    sampler_config: # EDM Sampler
+      target: sgm.modules.diffusionmodules.sampling.EulerEDMSampler
+      params:
+        num_steps: 50
+
+        discretization_config:
+          target: sgm.modules.diffusionmodules.discretizer.LegacyDDPMDiscretization
+
+        guider_config: # CFG guider
+          target: sgm.modules.diffusionmodules.guiders.VanillaCFG
+          params:
+            scale: 7.5
+
+data:
+  target: sgm.data.in1k_dataset.ImagenetLoader
+  params:
+    train:
+      resize: 256
+      data_path: '/mnt/petrelfs/luzeyu/datasets/imagenet1k/images/train'
+      loader:
+        batch_size: 64 # 32*8=256
+        num_workers: 4
+        shuffle: True
+
+lightning:
+  strategy:
+    target: pytorch_lightning.strategies.DDPStrategy
+    params:
+      find_unused_parameters: False
+
+  modelcheckpoint:
+    save_last_checkpoint:
+      params:
+        every_n_epochs: 1
+        save_last: True
+
+    save_period_checkpoint:
+      params:
+        every_n_train_steps: 5000
+        save_top_k: 2
+        monitor: step
+        mode: max
+        save_last: False
+
+  callbacks:
+    image_logger:
+      target: sgm.utils.lit_utils.ImageLogger
+      params:
+        enable_autocast: False
+        batch_frequency: 1000
+        max_images: 8
+        increase_log_steps: True
+        clamp: True
+
+  trainer:
+    accumulate_grad_batches: 1
+    max_epochs: 100

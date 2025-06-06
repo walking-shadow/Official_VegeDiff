@@ -1,0 +1,129 @@
+model:
+  base_learning_rate: 4.5e-6
+  target: sgm.models.autoencoder_lit2.AutoencodingEngine
+  params:
+    input_key: tif
+    monitor: val/rec_loss
+
+    loss_config:
+      target: sgm.modules.autoencoding.losses.GeneralLPIPSWithDiscriminator
+      params:
+        perceptual_weight: 0  # 遥感图像中不需要进行全局控制的感知损失，只需要完全还原的重建损失即可
+        disc_start: 50001
+        disc_weight: 0.5
+        learn_logvar: True
+        disc_in_channels: 4
+
+        regularization_weights:
+          kl_loss: 0.000001  # 提高kl_loss来让latent space中的特征分布更接近于正太分布，从而让后面的stable diffusion更好学习
+
+    regularizer_config:
+      target: sgm.modules.autoencoding.regularizers.DiagonalGaussianRegularizer
+
+    encoder_config:
+      target: sgm.modules.diffusionmodules.model.Encoder
+      params:
+        attn_type: none
+        double_z: True
+        z_channels: 4
+        resolution: 128
+        in_channels: 4
+        out_ch: 4
+        ch: 128
+        ch_mult: [ 1, 2, 2, 4 ]
+        num_res_blocks: 2
+        attn_resolutions: [ ]
+        dropout: 0.0
+
+    decoder_config:
+      target: sgm.modules.diffusionmodules.model.Decoder
+      params:
+        attn_type: none
+        double_z: False
+        z_channels: 4
+        resolution: 128
+        in_channels: 4
+        out_ch: 4
+        ch: 128
+        ch_mult: [ 1, 2, 2, 4 ]
+        num_res_blocks: 2
+        attn_resolutions: [ ]
+        dropout: 0.0
+
+data:
+  target: sgm.data.in1k_dataset.ImagenetLoader
+  params:
+    train:
+      crop_size: 128
+      # TODO ZSJ 改成记录了所有.tif文件的csv文件的绝对路径
+      # data_file_path: '/mnt/petrelfs/zhaosijie/stable_diffusion_autoencoder/sgm/data/tif_file_path.txt'
+      # data_root_dir: 'cluster1:s3://earth_land_cover_bench/global_dataset'
+      data_file_path: '/mnt/petrelfs/zhaosijie/stable_diffusion_autoencoder/sgm/data/earthnet_bgrn_path_file.txt'
+      data_root_dir: 'cluster1:s3://earth_land_cover_bench/earthnet_bgrn_data_new'
+      loader:
+        batch_size: 64 # 3bs x 4gpu = 12total_bs  # change 3 to 2
+        num_workers: 16
+        shuffle: True
+
+# lightning:
+#   strategy:
+#     target: pytorch_lightning.strategies.DDPStrategy
+#     params:
+#       find_unused_parameters: True
+
+#   modelcheckpoint:
+#     params:
+#       every_n_train_steps: 5000
+
+#   callbacks:
+#     metrics_over_trainsteps_checkpoint:
+#       params:
+#         every_n_train_steps: 50000
+
+#     image_logger:
+#       target: main.ImageLogger
+#       params:
+#         enable_autocast: False
+#         batch_frequency: 1000
+#         max_images: 8
+#         increase_log_steps: True
+
+#   trainer:
+#     limit_val_batches: 50
+#     benchmark: True
+#     accumulate_grad_batches: 1
+#     val_check_interval: 10000
+
+lightning:
+  strategy:
+    target: pytorch_lightning.strategies.DDPStrategy
+    params:
+      find_unused_parameters: True
+
+  modelcheckpoint:
+    save_last_checkpoint:
+      params:
+        every_n_epochs: 1
+        save_last: True
+
+    save_period_checkpoint:
+      params:
+        every_n_train_steps: 2000
+        save_top_k: 2
+        monitor: step
+        mode: max
+        save_last: False
+
+  callbacks:
+    image_logger:
+      target: sgm.utils.lit_utils.ImageLogger
+      params:
+        enable_autocast: False
+        batch_frequency: 1000
+        max_images: 8
+        increase_log_steps: True
+        clamp: True
+
+  trainer:
+    accumulate_grad_batches: 1
+    max_epochs: 60

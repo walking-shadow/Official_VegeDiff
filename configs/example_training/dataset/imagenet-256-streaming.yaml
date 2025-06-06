@@ -1,0 +1,13 @@
+data:
+  target: sgm.data.in1k_streaming_dataset.ImagenetLoader
+  params:
+    train:
+      resize: 256
+      local: './tmp/imagenet/'
+      remote: '/mnt/data/oss_beijing/imagenet1k/mds_test/'
+      cache_limit: '10gb'
+      shuffle_block_size: 100000
+      loader:
+        batch_size: 2
+        num_workers: 4
+        shuffle: True

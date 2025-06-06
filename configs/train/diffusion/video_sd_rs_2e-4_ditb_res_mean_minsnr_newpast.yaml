@@ -1,0 +1,279 @@
+diffusion:
+  scale_factor: 0.13025
+  # scale_factor: 1
+
+  disable_first_stage_autocast: True
+  # pretrained_image_ckpt: checkpoints/sd_xl_base_1.0.safetensors
+  # pretrained_image_ckpt: checkpoints/768-v-ema.safetensors
+  input_key: imgs
+  img_log_step_inteval: 100  # 每若干步就记录一次图片
+  log_keys: # TODO
+    - txt
+
+  # LR schedule #TODO
+  # scheduler_config:
+  #   target: sgm.lr_scheduler.LambdaLinearScheduler
+  #   params:
+  #     warm_up_steps: [ 10000 ]
+  #     cycle_lengths: [ 10000000000000 ]
+  #     f_start: [ 1.e-6 ]
+  #     f_max: [ 1. ]
+  #     f_min: [ 1. ]
+
+  # # Video SD-XL
+  # network_config:
+  #   target: sgm.modules.diffusionmodules.models.videomodel.VideoUNetModel
+  #   params:
+  #     # adm_in_channels: 1536  # 不需要图像大小信息了，因此默认为None。必须设置成conditioner_config中所有vector condition的outdim之和乘2（因为它们被初始设置为长度为2的tensor）
+  #     noise_image_num: 20 # 加噪过程中，需要加入噪声的图像的数量，即需要预测的未来图像的数量
+  #     image_time_length: 30  # 时间序列长度
+  #     # num_classes: sequential  # 不需要图像大小信息了，因此默认为none
+  #     use_checkpoint: False
+  #     in_channels: 4
+  #     out_channels: 4
+  #     model_channels: 160
+  #     attention_resolutions: [4, 2, 1]
+  #     num_res_blocks: 2
+  #     channel_mult: [1, 2, 2, 4]
+  #     # disable_self_attentions: [True, True, True] # 设置spatial transformer是否使用self-attention，长度应当和channel_mult一致
+  #     # 值为True表示某一层的两个自注意力都使用cross attention
+
+  #     num_head_channels: 32
+  #     use_spatial_transformer: True
+  #     use_linear_in_transformer: True
+  #     transformer_depth: 1  # note: the first is unused (due to attn_res starting at 2) 32, 16, 8 --> 64, 32, 16
+  #     context_dim: 512  # condition image进行交叉注意力时的维度，设置为原有的text_dim=2048，这样方便加载预训练模型的参数
+  #     spatial_transformer_attn_type: softmax
+  #     legacy: False
+  #     temporal_module_kwargs:
+  #       num_attention_heads                : 8
+  #       # num_transformer_block              : 1 # now we don't support setting block layer from config
+  #       # attention_block_types              : [ "Temporal_Self", "Temporal_Self" ]
+  #       attention_block_types              : [ "Temporal_Self" ]
+  #       temporal_position_encoding         : true
+  #       temporal_position_encoding_max_len : 30
+  #       temporal_attention_dim_div         : 1
+  #       zero_initialize                    : true
+  #       gradient_checkpoint                : true
+  # network_wrapper: sgm.modules.diffusionmodules.wrappers.VideoWrapper
+  # compile_model: False
+  # trainable_modules:
+  #   - "temporal_transformer"  # 表示时序注意力
+  #   # - "attn2"  # 表示交叉注意力
+  #   - "transformer_blocks"  # 表示交叉注意力和空间自注意力
+  
+  # DiT
+  network_config:
+    target: sgm.modules.diffusionmodules.models.DiT.DiT
+
+    # DiT-XL
+    # params:
+    #   depth: 28
+    #   hidden_size: 1152
+    #   patch_size: 2
+    #   num_heads: 16
+    #   learn_sigma: False
+    #   use_checkpoint: True
+
+  #   # DiT-S
+  #   params:
+  #     input_size: 16
+  #     depth: 12
+  #     hidden_size: 384
+  #     patch_size: 2
+  #     num_heads: 6
+  #     learn_sigma: False
+  #     use_checkpoint: True
+  #     noise_image_num: 20 # 加噪过程中，需要加入噪声的图像的数量，即需要预测的未来图像的数量
+  #     image_time_length: 30  # 时间序列长度
+  #     temporal_module_kwargs:
+  #       num_attention_heads                : 6
+  #       attention_block_types              : [ "Temporal_Self" ]
+  #       temporal_position_encoding         : true
+  #       temporal_position_encoding_max_len : 30
+  #       temporal_attention_dim_div         : 1
+  #       zero_initialize                    : true
+  #       gradient_checkpoint                : true
+  # network_wrapper: sgm.modules.diffusionmodules.wrappers.DiTWrapper
+  # compile_model: False
+
+    # DiT-B
+    params:
+      input_size: 16
+      depth: 12
+      hidden_size: 768
+      patch_size: 2
+      num_heads: 12
+      learn_sigma: False
+      use_checkpoint: True
+      noise_image_num: 20 # 加噪过程中，需要加入噪声的图像的数量，即需要预测的未来图像的数量
+      image_time_length: 30  # 时间序列长度
+      temporal_module_kwargs:
+        num_attention_heads                : 6
+        attention_block_types              : [ "Temporal_Self" ]
+        temporal_position_encoding         : true
+        temporal_position_encoding_max_len : 30
+        temporal_attention_dim_div         : 1
+        zero_initialize                    : true
+        gradient_checkpoint                : true
+  network_wrapper: sgm.modules.diffusionmodules.wrappers.DiTWrapper
+  compile_model: False
+
+  # conditioner config
+  conditioner_config:
+    target: sgm.modules.GeneralConditioner
+    params:
+      emb_models:
+
+        # meso condition vector cond
+        - is_trainable: True
+          input_key: meso_condition_image
+          ucg_rate: 0.1
+          target: sgm.modules.encoders.modules.Climate_Extractor
+          params:
+            in_channel: 24
+            out_channel: 256  # 两个condition image的输出通道数相加需要和context_dim一致
+
+        # highres condition vector cond
+        - is_trainable: True
+          input_key: highres_condition_image
+          ucg_rate: 0.1
+          target: torchvision.models.resnet18
+          in_channel: 5
+          out_channel: 256  # 两个condition image的输出通道数相加需要和context_dim一致
+          pretrained_path: 'checkpoints/resnet18-f37072fd.pth'
+          params:
+            pretrained: False
+
+        # # vector cond
+        # - is_trainable: False
+        #   ucg_rate: 0.1
+        #   input_key: original_size_as_tuple
+        #   target: sgm.modules.encoders.modules.ConcatTimestepEmbedderND
+        #   params:
+        #     outdim: 256  # multiplied by two
+        # # vector cond 
+        # - is_trainable: False
+        #   ucg_rate: 0.1
+        #   input_key: crop_coords_top_left
+        #   target: sgm.modules.encoders.modules.ConcatTimestepEmbedderND
+        #   params:
+        #     outdim: 256  # multiplied by two
+        # # vector cond
+        # - is_trainable: False
+        #   ucg_rate: 0.1
+        #   input_key: target_size_as_tuple
+        #   target: sgm.modules.encoders.modules.ConcatTimestepEmbedderND
+        #   params:
+        #     outdim: 256  # multiplied by two
+
+  # VAE config 
+  first_stage_config:
+    config_path: configs/train/autoencoder/autoencoder_kl_32x32x4.yaml
+    pretrained_path: checkpoints/autoencoder_rs.ckpt  # TODO 修改成自己的autoencoder预训练模型
+    # from_pretrained: stabilityai/sdxl-vae
+
+  # DM config
+  denoiser_config:
+    target: sgm.modules.diffusionmodules.denoiser.DiscreteDenoiser
+    params:
+      num_idx: 1000
+
+      weighting_config:
+        # target: sgm.modules.diffusionmodules.denoiser_weighting.EpsWeighting
+        target: sgm.modules.diffusionmodules.denoiser_weighting.MinSNRWeight
+      scaling_config:
+        target: sgm.modules.diffusionmodules.denoiser_scaling.EpsScaling
+      discretization_config:
+        target: sgm.modules.diffusionmodules.discretizer.LegacyDDPMDiscretization
+
+  loss_fn_config: # EDM loss
+    target: sgm.modules.diffusionmodules.loss.StandardDiffusionLoss
+    params:
+      noise_image_num: 20 # 加噪过程中，需要加入噪声的图像的数量，即需要预测的未来图像的数量
+      sigma_sampler_config:
+        target: sgm.modules.diffusionmodules.sigma_sampling.DiscreteSampling
+        params:
+          num_idx: 1000  # 加噪过程中，噪声的级别数量
+          discretization_config:
+            target: sgm.modules.diffusionmodules.discretizer.LegacyDDPMDiscretization
+
+  sampler_config: # EDM Sampler
+    target: sgm.modules.diffusionmodules.sampling.EulerEDMSampler
+    params:
+      num_steps: 50
+
+      discretization_config:
+        target: sgm.modules.diffusionmodules.discretizer.LegacyDDPMDiscretization
+
+      guider_config: # CFG guider
+        target: sgm.modules.diffusionmodules.guiders.VanillaCFG
+        params:
+          scale: 5
+
+
+data:
+  target: sgm.data.webvid10m.Webvid10MLoader
+  params:
+    mode: train  # should be train or test
+    # high_resolution: [128, 128]
+    # meso_resolution: [80, 80]
+    data_root_dir: 'cluster1:s3://earth_land_cover_bench/earthnet2021x_data'
+    train_data_path_file: '/mnt/petrelfs/zhaosijie/video_stable_diffusion/stable_diffusion_video/data_path_file/train_path_file.txt'
+    # train_data_mean: [0.20569735, 0.21914243, 0.22088862, 0.36983472]
+    # train_data_var: [0.07937277, 0.06975007, 0.06693621, 0.04060663]
+    # meta_path: dataset/meta/webvid10m_clean_meta.txt
+    # task_txt: write some task txt here
+    fp16: False  # using fp16 or fp32
+    min_lc: 10
+    max_lc: 40
+    noise_image_num: 20
+    # val_pct: 0.01
+    # val_split_seed: 42
+    train_batch_size: 32  # for each gpu
+    # val_batch_size: 4
+    test_batch_size: 16  # 可以是训练的4倍
+    num_workers: 8
+    test_track: "iid"
+
+      # clip_length: 16
+      # clip_FPS_reate: 4
+      # resize_resolution: [512]
+      # crop_resolution: [512, 512]
+      # horizontal_flip: True
+      # loader:
+      #   batch_size: 3 # for each pgu
+      #   num_workers: 8
+      #   shuffle: True
+
+accelerate:
+  # others
+  gradient_accumulation_steps: 1
+  mixed_precision: bf16
+  
+  # training step config
+  num_train_epochs: 400
+  max_train_steps: 
+  # optimizer config
+  learning_rate: 0.0002 # 4 GPU x 32 Batch Size
+  learning_rate_base_batch_size: 128
+  max_grad_norm: 1.0
+  optimizer:
+    target: torch.optim.AdamW
+    params:
+      betas: ${tuple:0.9, 0.999}
+      weight_decay: 0.01
+      eps: 1e-8
+  lr_scheduler: constant
+  lr_warmup_steps: 500
+  # checkpoint config
+  checkpointing_epochs: False  # 设置为True会导致一个epoch里很多步都记录模型，占得空间太大
+  checkpointing_steps: 2500 # 1000
+  checkpointing_steps_list: [2500, 5000, 10000, 20000, 40000, 80000, 160000, 320000, 640000]
+  checkpoints_total_limit: 5
+  logging_steps: 1000
+  validate_epoch_interval: 1
+  validate_batch_num: 100
+  # validation config
+  # validate_steps: 5000
+  # log_video_numbers: 4

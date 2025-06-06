@@ -1,0 +1,29 @@
+lightning:
+  strategy:
+    target: pytorch_lightning.strategies.DDPStrategy
+    params:
+      find_unused_parameters: True
+
+  modelcheckpoint:
+    params:
+      every_n_train_steps: 5000
+
+  callbacks:
+    metrics_over_trainsteps_checkpoint:
+      params:
+        every_n_train_steps: 50000
+
+    image_logger:
+      target: main.ImageLogger
+      params:
+        enable_autocast: False
+        batch_frequency: 1000
+        max_images: 8
+        increase_log_steps: True
+
+  trainer:
+    devices: 0,
+    limit_val_batches: 50
+    benchmark: True
+    accumulate_grad_batches: 1
+    val_check_interval: 10000
