@@ -6,7 +6,7 @@
 <br>
 
 <div align="center">
-  <img src="resources/VegeDiff.png" width="800"/>
+  <img src="resources/VegeDiff.jpg" width="800"/>
 </div>
 <br>
 <div align="center">
